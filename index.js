@@ -239,7 +239,8 @@ function getRandomElement(arr) {
 function loadStarCitizenNews() {
   try {
     const fs = require('fs');
-    const newsData = JSON.parse(fs.readFileSync('/home/ubuntu/ASAR/sc_news.json', 'utf8'));
+    const newsPath = fs.existsSync('/home/ubuntu/ASAR/sc_news.json') ? '/home/ubuntu/ASAR/sc_news.json' : __dirname + '/sc_news_default.json';
+    const newsData = JSON.parse(fs.readFileSync(newsPath, 'utf8'));
     scNews = newsData.stories || [];
     newsIndex = 0;
     console.log(`Loaded ${scNews.length} Star Citizen news stories`);
