@@ -5,12 +5,12 @@ const { AudioPlayer, createAudioResource, StreamType, joinVoiceChannel, createAu
 const ytdl = require("@distube/ytdl-core");
 const ytpl = require('ytpl');
 const discordTTS = require("discord-tts");
-const NewsAPI = require('newsapi');
+// NewsAPI removed - using Star Citizen news from Reddit instead
 const { Configuration, OpenAIApi } = require('openai');
 const sdk = require('microsoft-cognitiveservices-speech-sdk');
 const { PassThrough } = require('stream');
 
-const newsapi = new NewsAPI(process.env.newsapikey);
+// NewsAPI initialization removed
 
 const configuration = new Configuration({
   apiKey: process.env.OPENAI_API_KEY,
