@@ -60,6 +60,41 @@ client.on('ready', async () => {
   queue();
 });
 
+// Monitor voice channel for empty state
+client.on('voiceStateUpdate', (oldState, newState) => {
+  // Check if someone left the radio channel
+  if (oldState.channelId && oldState.channel?.name.toLowerCase().includes('radio')) {
+    const channel = oldState.channel;
+    // Count non-bot members in the channel
+    const memberCount = channel.members.filter(member => !member.user.bot).size;
+    
+    if (memberCount === 0) {
+      console.log('Voice channel empty, disconnecting...');
+      const connection = getVoiceConnection(channel.guild.id);
+      if (connection) {
+        connection.destroy();
+        player.stop();
+        console.log('Disconnected from empty channel');
+      }
+    }
+  }
+  
+  // Check if someone joined the radio channel and bot is not connected
+  if (newState.channelId && newState.channel?.name.toLowerCase().includes('radio')) {
+    const channel = newState.channel;
+    const connection = getVoiceConnection(channel.guild.id);
+    const memberCount = channel.members.filter(member => !member.user.bot).size;
+    
+    if (!connection && memberCount > 0) {
+      console.log('User joined radio channel, reconnecting...');
+      connectToChannel(channel);
+      if (player.state.status !== AudioPlayerStatus.Playing) {
+        queue();
+      }
+    }
+  }
+});
+
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
