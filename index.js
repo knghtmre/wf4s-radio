@@ -281,6 +281,7 @@ async function get(newsItem, nextSong, url, hasNews) {
       prompt = includeZulu
         ? `You are Ava, the AI DJ for WF4S Haulin' Radio, a Star Citizen-themed station. It's ${zuluTime}. Announce that you're playing this song next: ${nextSong} Keep it under 120 characters. Be brief, energetic, and use space/hauling slang!`
         : `You are Ava, the AI DJ for WF4S Haulin' Radio, a Star Citizen-themed station. Announce that you're playing this song next: ${nextSong} Keep it under 100 characters. Be brief, energetic, and use space/hauling slang!`;
+    }
 
     const completion = await openai.createChatCompletion({
       model: "gpt-4o",
