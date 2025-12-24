@@ -298,14 +298,14 @@ async function playAudio(link, message) {
 
   if(premiumVoice == false){
   const messageParts = splitString(message);
-  playTextToSpeechOld(messageParts.shift());
+  playTextToSpeech(messageParts.shift());
   setTimeout(function(){
   player.on(AudioPlayerStatus.Idle, () => {
     if (messageParts.length === 0) {
       player.removeAllListeners();
       playSong(link);
     } else {
-      playTextToSpeechOld(messageParts.shift());
+      playTextToSpeech(messageParts.shift());
     }
   });
 },3000)
