@@ -331,7 +331,7 @@ function playTextToSpeechGoogle(text) {
   player.play(audioResource);
 }
 
-async function playTextToSpeechAzure(text) {
+async function playTextToSpeech(text) {
   const azureKey = process.env.AZURE_SPEECH_KEY;
   const azureRegion = process.env.AZURE_SPEECH_REGION || 'eastus';
   
@@ -382,7 +382,7 @@ async function playTextToSpeechAzure(text) {
   });
 }
 
-async function playTextToSpeech(text) {
+async function playTextToSpeechElevenLabs(text) {
   const stream = await voice.textToSpeechStream({
     textInput: text,
     responseType: 'stream', // Stream the audio directly
