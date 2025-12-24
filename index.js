@@ -7,6 +7,8 @@ const ytpl = require('ytpl');
 const discordTTS = require("discord-tts");
 const NewsAPI = require('newsapi');
 const { Configuration, OpenAIApi } = require('openai');
+const sdk = require('microsoft-cognitiveservices-speech-sdk');
+const { PassThrough } = require('stream');
 
 const newsapi = new NewsAPI(process.env.newsapikey);
 
@@ -17,6 +19,11 @@ const openai = new OpenAIApi(configuration);
 
 let premiumVoice = true;
 let dataradio = process.env.dataradio;
+
+// Star Citizen news tracking
+let scNews = [];
+let newsIndex = 0;
+let songsSinceNews = 0;
 
 const ElevenLabs = require('elevenlabs-node');
 let voice = undefined;
@@ -104,41 +111,41 @@ async function start() {
     });
   });
 
+  // Load Star Citizen news on first run
+  if (scNews.length === 0) {
+    loadStarCitizenNews();
+  }
+
   try {
-    const todaysDate = new Date();
-    const formattedDate = `${todaysDate.getFullYear()}-${String(todaysDate.getMonth() + 1).padStart(2, '0')}-${String(todaysDate.getDate()).padStart(2, '0')}`;
-
-    const newsResponse = await newsapi.v2.topHeadlines({
-      sources: 'bbc-news,the-verge,abc-news,al-jazeera-english,ars-technica,cnn',
-      from: formattedDate,
-      to: formattedDate,
-      language: process.env.language,
-      page: 1
-    });
-
-    if (newsResponse.status !== "ok" || !newsResponse.articles || newsResponse.articles.length === 0) {
-      console.log('No articles found in response');
-      playInitialMessage();
-      return;
-    }
 
     try {
-      const playlist = await ytpl(process.env.ytplaylist, { limit: 100 });
-      if (!playlist || !playlist.items || playlist.items.length === 0) {
-        console.error('No valid items in playlist');
+      // Get trending tracks from Audius
+      const audiusTracks = await getAudiusTracks();
+      if (!audiusTracks || audiusTracks.length === 0) {
+        console.error('No tracks available from Audius');
         playInitialMessage();
         return;
       }
 
-      const nextSong = await getNextSong(playlist.items);
-      if (!nextSong || !nextSong.shortUrl) {
+      const nextSong = getRandomElement(audiusTracks);
+      if (!nextSong) {
         console.error('Could not get next song');
         playInitialMessage();
         return;
       }
 
-      const newsItem = getRandomElement(newsResponse.articles);
-      await get(newsItem, nextSong.title, nextSong.shortUrl);
+      // Decide if we should announce news (every 3-5 songs)
+      songsSinceNews++;
+      const shouldAnnounceNews = songsSinceNews >= 3 && Math.random() < 0.6; // 60% chance after 3 songs
+      
+      if (shouldAnnounceNews && scNews.length > 0) {
+        const newsItem = getNextNews();
+        await get(newsItem, nextSong.title, nextSong.id, true);
+        songsSinceNews = 0;
+      } else {
+        // Just announce the song
+        await get(null, nextSong.title, nextSong.id, false);
+      }
     } catch (error) {
       console.error('Error in playlist handling:', error);
       playInitialMessage();
@@ -152,6 +159,34 @@ async function start() {
 function playInitialMessage() {
   let resource = createAudioResource("./warte.mp3")
   player.play(resource)
+}
+
+async function getAudiusTracks() {
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    https.get('https://api.audius.co/v1/tracks/trending?app_name=WF4SRadio&limit=50', (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const response = JSON.parse(data);
+          if (response.data && response.data.length > 0) {
+            const tracks = response.data.map(track => ({
+              id: track.id,
+              title: `${track.user.name} - ${track.title}`,
+              artist: track.user.name
+            }));
+            console.log(`Loaded ${tracks.length} tracks from Audius`);
+            resolve(tracks);
+          } else {
+            reject(new Error('No tracks found'));
+          }
+        } catch (error) {
+          reject(error);
+        }
+      });
+    }).on('error', reject);
+  });
 }
 
 async function getNextSong(items) {
@@ -201,25 +236,44 @@ function getRandomElement(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-async function get(newsItem, nextSong, url) {
+function loadStarCitizenNews() {
+  try {
+    const fs = require('fs');
+    const newsData = JSON.parse(fs.readFileSync('/home/ubuntu/ASAR/sc_news.json', 'utf8'));
+    scNews = newsData.stories || [];
+    newsIndex = 0;
+    console.log(`Loaded ${scNews.length} Star Citizen news stories`);
+  } catch (error) {
+    console.error('Error loading Star Citizen news:', error.message);
+    scNews = [];
+  }
+}
+
+function getNextNews() {
+  if (scNews.length === 0) return null;
+  const news = scNews[newsIndex];
+  newsIndex = (newsIndex + 1) % scNews.length;
+  return news;
+}
+
+async function get(newsItem, nextSong, url, hasNews) {
   const todaysDate = new Date();
   const time = todaysDate.getHours()+":"+todaysDate.getMinutes();
 
   try {
-    const prompt = `You are an AI DJ in an online radio station with these characteristics: ${JSON.stringify(dataradio)}. 
-    This message comes after a song. Create an engaging radio announcement about this news: "${newsItem.title}".
-    Use this data for accuracy: ${newsItem.description}
-    Then announce that you'll play this song next: ${nextSong}
-    Current time is: ${time}
-    
-    Important: Speak in ${process.env.language} and keep the tone natural and engaging.`;
+    let prompt;
+    if (hasNews && newsItem) {
+      prompt = `You are Ava, the AI DJ for WF4S Haulin' Radio, a Star Citizen-themed station. Announce this Star Citizen news: "${newsItem.condensed}" Then announce you'll play this song next: ${nextSong} Keep it under 180 characters total. Be energetic and use space/hauling slang!`;
+    } else {
+      prompt = `You are Ava, the AI DJ for WF4S Haulin' Radio, a Star Citizen-themed station. Announce that you're playing this song next: ${nextSong} Keep it under 100 characters. Be brief, energetic, and use space/hauling slang!`;
+    }
 
     const completion = await openai.createChatCompletion({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are a professional radio DJ. Keep responses concise and engaging, perfect for radio broadcasting."
+          content: "You are Ava, the sassy AI DJ for WF4S Haulin' Radio. You're funny, use space puns, trucker slang, and Star Citizen jokes. Keep it VERY SHORT (max 180 chars). Be witty, playful, and entertaining!"
         },
         {
           role: "user",
@@ -227,7 +281,7 @@ async function get(newsItem, nextSong, url) {
         }
       ],
       temperature: 0.7,
-      max_tokens: 300
+      max_tokens: 80
     });
 
     const text = completion.data.choices[0].message.content;
@@ -256,27 +310,82 @@ async function playAudio(link, message) {
   });
 },3000)
 }else{
-  playTextToSpeech(message);
+  // Play TTS and wait for it to finish
+  playTextToSpeechAzure(message);  // Azure TTS
+  
+  // Wait a bit for TTS to start, then listen for it to finish
   setTimeout(function(){
-    player.on(AudioPlayerStatus.Idle, () => {
+    player.once(AudioPlayerStatus.Idle, () => {
+      console.log('TTS finished, starting music...');
       playSong(link);
-  });
-  },3000)
+    });
+  }, 1000)  // Short delay to let TTS start
 
 }
 }
 
-function playTextToSpeechOld(text) {
+function playTextToSpeechGoogle(text) {
   const stream = discordTTS.getVoiceStream(text);
   const audioResource = createAudioResource(stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
   player.play(audioResource);
+}
+
+async function playTextToSpeechAzure(text) {
+  const azureKey = process.env.AZURE_SPEECH_KEY;
+  const azureRegion = process.env.AZURE_SPEECH_REGION || 'eastus';
+  
+  if (!azureKey) {
+    console.error('Azure Speech key not configured, falling back to Google TTS');
+    playTextToSpeechGoogle(text);
+    return;
+  }
+  
+  return new Promise((resolve, reject) => {
+    const speechConfig = sdk.SpeechConfig.fromSubscription(azureKey, azureRegion);
+    speechConfig.speechSynthesisVoiceName = 'en-US-Ava:DragonHDLatestNeural';  // Premium HD voice
+    
+    const synthesizer = new sdk.SpeechSynthesizer(speechConfig, null);
+    
+    synthesizer.speakTextAsync(
+      text,
+      result => {
+        if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+          console.log('Azure TTS: Audio synthesized successfully');
+          
+          // Get audio data as buffer
+          const audioData = result.audioData;
+          const buffer = Buffer.from(audioData);
+          
+          // Create a readable stream from buffer
+          const { Readable } = require('stream');
+          const stream = Readable.from(buffer);
+          
+          const audioResource = createAudioResource(stream, { 
+            inputType: StreamType.Arbitrary,
+            inlineVolume: true 
+          });
+          player.play(audioResource);
+          resolve();
+        } else {
+          console.error('Azure TTS error:', result.errorDetails);
+          reject(new Error(result.errorDetails));
+        }
+        synthesizer.close();
+      },
+      error => {
+        console.error('Azure TTS error:', error);
+        synthesizer.close();
+        reject(error);
+      }
+    );
+  });
 }
 
 async function playTextToSpeech(text) {
   const stream = await voice.textToSpeechStream({
     textInput: text,
     responseType: 'stream', // Stream the audio directly
-    voiceId:         "Jdr9LWY1JEhgc5qzlOyT",         // A different Voice ID from the default
+    voiceId:         "x8xv0H8Ako6Iw3cKXLoC",         // User's custom voice
     modelId:         "eleven_multilingual_v2",       // The ElevenLabs Model ID
     responseType:    "stream",                       // The streaming type (arraybuffer, stream, json)    
   });
@@ -286,47 +395,53 @@ async function playTextToSpeech(text) {
   player.play(audioResource);
 }
 
-async function playSong(link) {
-  if (!link || typeof link !== 'string') {
-    console.error('Invalid link provided to playSong:', link);
+async function playSong(trackId) {
+  if (!trackId || typeof trackId !== 'string') {
+    console.error('Invalid track ID provided to playSong:', trackId);
     queue();
     return;
   }
 
-  console.log('Playing song:', link);
+  console.log('Playing Audius track:', trackId);
   
   try {
-    // Validate URL before attempting to play
-    try {
-      await ytdl.getBasicInfo(link);
-    } catch (error) {
-      console.error('Invalid YouTube URL or video unavailable:', error);
-      queue();
-      return;
-    }
-
-    const stream = ytdl(link, {
-      filter: 'audioonly',
-      quality: 'highestaudio',
-      highWaterMark: 1 << 25, // 32MB buffer
-      requestOptions: {
-        headers: {
-          cookie: process.env.YOUTUBE_COOKIE || '',
-          'Accept': '*/*',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    // Audius stream URL - simple and direct!
+    const streamUrl = `https://api.audius.co/v1/tracks/${trackId}/stream?app_name=WF4SRadio`;
+    console.log('Stream URL:', streamUrl);
+    
+    const https = require('https');
+    
+    // Create a promise to wait for the response
+    const stream = await new Promise((resolve, reject) => {
+      https.get(streamUrl, (response) => {
+        if (response.statusCode === 302 || response.statusCode === 301) {
+          // Follow redirect
+          const redirectUrl = response.headers.location;
+          console.log('Following redirect to:', redirectUrl);
+          https.get(redirectUrl, (redirectResponse) => {
+            if (redirectResponse.statusCode === 200) {
+              resolve(redirectResponse);
+            } else {
+              reject(new Error(`HTTP ${redirectResponse.statusCode}`));
+            }
+          }).on('error', reject);
+        } else if (response.statusCode === 200) {
+          resolve(response);
+        } else {
+          reject(new Error(`HTTP ${response.statusCode}`));
         }
-      }
+      }).on('error', reject);
     });
 
     stream.on('error', (error) => {
-      console.error('YouTube stream error:', error);
+      console.error('Audius stream error:', error);
       queue();
     });
 
     const resource = createAudioResource(stream, {
       inputType: StreamType.Arbitrary,
-      inlineVolume: true
+      inlineVolume: true,
+      highWaterMark: 1 << 25  // 32MB buffer to prevent skipping
     });
 
     resource.volume?.setVolume(1);
