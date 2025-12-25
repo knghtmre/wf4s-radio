@@ -281,17 +281,41 @@ async function getSoundCloudTracks() {
     
     const results = await Promise.race([searchPromise, timeoutPromise]);
     
-    if (!results || results.length === 0) {
-      throw new Error('No SoundCloud tracks found');
+    console.log('SoundCloud search results type:', typeof results);
+    console.log('SoundCloud search results:', JSON.stringify(results).substring(0, 200));
+    
+    // Handle different response formats
+    let tracksArray = [];
+    if (Array.isArray(results)) {
+      tracksArray = results;
+    } else if (results && results.collection && Array.isArray(results.collection)) {
+      tracksArray = results.collection;
+    } else if (results && results.tracks && Array.isArray(results.tracks)) {
+      tracksArray = results.tracks;
+    } else {
+      console.error('Unexpected SoundCloud response format:', results);
+      throw new Error('Invalid SoundCloud response format');
     }
     
-    // Format tracks to match our structure
-    const tracks = results.map(track => ({
-      id: track.url,  // SoundCloud URL
-      title: `${track.artist} - ${track.name}`,
-      artist: track.artist,
-      source: 'soundcloud'
-    }));
+    if (!tracksArray || tracksArray.length === 0) {
+      throw new Error('No SoundCloud tracks found in response');
+    }
+    
+    console.log(`Processing ${tracksArray.length} SoundCloud tracks`);
+    
+    // Format tracks to match our structure with validation
+    const tracks = tracksArray
+      .filter(track => track && track.url && (track.name || track.title))
+      .map(track => ({
+        id: track.url,  // SoundCloud URL
+        title: `${track.artist || 'Unknown'} - ${track.name || track.title || 'Unknown'}`,
+        artist: track.artist || 'Unknown',
+        source: 'soundcloud'
+      }));
+    
+    if (tracks.length === 0) {
+      throw new Error('No valid SoundCloud tracks after filtering');
+    }
     
     // Cache the tracks
     soundcloudTracks = tracks;
