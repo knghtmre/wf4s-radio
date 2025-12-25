@@ -508,8 +508,18 @@ async function playTextToSpeech(text) {
     
     const synthesizer = new sdk.SpeechSynthesizer(speechConfig, null);
     
-    synthesizer.speakTextAsync(
-      text,
+    // Create SSML for better speech quality with natural pauses
+    const ssml = `
+<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
+  <voice name="en-US-AvaMultilingualNeural">
+    <prosody rate="1.0" pitch="0%">
+      ${text}
+    </prosody>
+  </voice>
+</speak>`;
+    
+    synthesizer.speakSsmlAsync(
+      ssml,
       result => {
         if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
           console.log('Azure TTS: Audio synthesized successfully');
@@ -633,7 +643,7 @@ async function playSong(songObj) {
       highWaterMark: 1 << 25  // 32MB buffer to prevent skipping
     });
 
-    resource.volume?.setVolume(1);
+    resource.volume?.setVolume(0.35);  // 35% volume to balance with voice
     
     // Remove existing listeners before adding new ones
     player.removeAllListeners();
