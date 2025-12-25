@@ -10,7 +10,8 @@ const { Configuration, OpenAIApi } = require('openai');
 const sdk = require('microsoft-cognitiveservices-speech-sdk');
 const { PassThrough } = require('stream');
 const SoundCloud = require('soundcloud-scraper');
-const soundcloudClient = new SoundCloud.Client();
+// Use API key from environment, or it will auto-generate one
+const soundcloudClient = new SoundCloud.Client(process.env.SOUNDCLOUD_API_KEY || 'dH1Xed1fpITYonugor6sw39jvdq58M3h');
 
 // NewsAPI initialization removed
 
@@ -303,48 +304,20 @@ async function getSoundCloudTracks() {
     
     console.log(`Processing ${tracksArray.length} SoundCloud tracks`);
     
-    // Format and validate tracks - test each one for availability
-    const validatedTracks = [];
-    console.log('Validating SoundCloud tracks for availability...');
+    // Format tracks - API key gives us access to all tracks
+    const tracks = tracksArray
+      .filter(track => track && track.url && (track.name || track.title))
+      .slice(0, 50) // Take up to 50 tracks
+      .map(track => ({
+        id: track.url,
+        title: `${track.artist || 'Unknown'} - ${track.name || track.title || 'Unknown'}`,
+        artist: track.artist || 'Unknown',
+        source: 'soundcloud'
+      }));
     
-    for (const track of tracksArray.slice(0, 20)) { // Test first 20 tracks
-      if (!track || !track.url || !(track.name || track.title)) {
-        continue;
-      }
-      
-      try {
-        // Quick validation: try to get song info
-        const songInfo = await Promise.race([
-          soundcloudClient.getSongInfo(track.url),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-        ]);
-        
-        // Check if track is streamable
-        if (songInfo && songInfo.trackURL) {
-          validatedTracks.push({
-            id: track.url,
-            title: `${track.artist || 'Unknown'} - ${track.name || track.title || 'Unknown'}`,
-            artist: track.artist || 'Unknown',
-            source: 'soundcloud'
-          });
-          
-          // Stop once we have 10 valid tracks
-          if (validatedTracks.length >= 10) {
-            break;
-          }
-        }
-      } catch (error) {
-        // Skip tracks that fail validation (private, unavailable, etc.)
-        continue;
-      }
+    if (tracks.length === 0) {
+      throw new Error('No valid SoundCloud tracks after filtering');
     }
-    
-    if (validatedTracks.length === 0) {
-      throw new Error('No streamable SoundCloud tracks found after validation');
-    }
-    
-    console.log(`Validated ${validatedTracks.length} streamable tracks out of ${tracksArray.length}`);
-    const tracks = validatedTracks;
     
     // Cache the tracks
     soundcloudTracks = tracks;
