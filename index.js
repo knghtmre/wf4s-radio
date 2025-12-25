@@ -303,21 +303,40 @@ async function getSoundCloudTracks() {
     }
     
     console.log(`Processing ${tracksArray.length} SoundCloud tracks`);
+    console.log('Testing tracks for streamability...');
     
-    // Format tracks - API key gives us access to all tracks
-    const tracks = tracksArray
-      .filter(track => track && track.url && (track.name || track.title))
-      .slice(0, 50) // Take up to 50 tracks
-      .map(track => ({
-        id: track.url,
-        title: `${track.artist || 'Unknown'} - ${track.name || track.title || 'Unknown'}`,
-        artist: track.artist || 'Unknown',
-        source: 'soundcloud'
-      }));
+    const validTracks = [];
+    const testLimit = Math.min(30, tracksArray.length);
     
-    if (tracks.length === 0) {
-      throw new Error('No valid SoundCloud tracks after filtering');
+    for (let i = 0; i < testLimit && validTracks.length < 15; i++) {
+      const track = tracksArray[i];
+      if (!track || !track.url || !(track.name || track.title)) continue;
+      
+      try {
+        const info = await Promise.race([
+          soundcloudClient.getSongInfo(track.url),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
+        ]);
+        
+        if (info && info.trackURL) {
+          validTracks.push({
+            id: track.url,
+            title: `${track.artist || 'Unknown'} - ${track.name || track.title || 'Unknown'}`,
+            artist: track.artist || 'Unknown',
+            source: 'soundcloud'
+          });
+        }
+      } catch (e) {
+        continue;
+      }
     }
+    
+    if (validTracks.length === 0) {
+      throw new Error('No streamable SoundCloud tracks found');
+    }
+    
+    console.log(`Found ${validTracks.length} streamable tracks`);
+    const tracks = validTracks;
     
     // Cache the tracks
     soundcloudTracks = tracks;
