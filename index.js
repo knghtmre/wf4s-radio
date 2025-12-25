@@ -12,6 +12,7 @@ const { PassThrough } = require('stream');
 const SoundCloud = require('soundcloud-scraper');
 // Use API key from environment, or it will auto-generate one
 const soundcloudClient = new SoundCloud.Client(process.env.SOUNDCLOUD_API_KEY || 'dH1Xed1fpITYonugor6sw39jvdq58M3h');
+const play = require('play-dl');
 
 // NewsAPI initialization removed
 
@@ -34,6 +35,10 @@ let soundcloudTracks = [];
 let soundcloudTrackIndex = 0;
 let soundcloudLastFetch = 0;
 const SOUNDCLOUD_CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+
+// Track recent announcements to avoid repetition
+let recentAnnouncements = [];
+const MAX_RECENT_ANNOUNCEMENTS = 5;
 
 const ElevenLabs = require('elevenlabs-node');
 let voice = undefined;
@@ -169,14 +174,25 @@ async function start() {
       let source = 'soundcloud';
       
       try {
-        console.log('Attempting to fetch tracks from SoundCloud...');
-        tracks = await getSoundCloudTracks();
-        console.log(`Loaded ${tracks.length} tracks from SoundCloud`);
-      } catch (scError) {
-        console.warn('SoundCloud failed, falling back to Audius:', scError.message);
-        source = 'audius';
-        tracks = await getAudiusTracks();
-        console.log(`Loaded ${tracks.length} tracks from Audius (fallback)`);
+        // Try YouTube first with play-dl
+        console.log('Attempting to fetch tracks from YouTube (play-dl)...');
+        const { getTracksWithPlayDl } = require('./get_tracks_playdl');
+        tracks = await getTracksWithPlayDl();
+        source = 'youtube';
+        console.log(`Loaded ${tracks.length} tracks from YouTube`);
+      } catch (ytError) {
+        console.warn('YouTube failed, trying SoundCloud:', ytError.message);
+        try {
+          console.log('Attempting to fetch tracks from SoundCloud...');
+          tracks = await getSoundCloudTracks();
+          source = 'soundcloud';
+          console.log(`Loaded ${tracks.length} tracks from SoundCloud`);
+        } catch (scError) {
+          console.warn('SoundCloud also failed, falling back to Audius:', scError.message);
+          source = 'audius';
+          tracks = await getAudiusTracks();
+          console.log(`Loaded ${tracks.length} tracks from Audius (fallback)`);
+        }
       }
       
       if (!tracks || tracks.length === 0) {
@@ -447,24 +463,43 @@ async function get(newsItem, songObj, hasNews) {
         : `You are Ava, the AI DJ for WF4S Haulin' Radio, a Star Citizen-themed station. Announce that you're playing this song next: ${nextSong} Keep it under 100 characters. Be brief, energetic, and use space/hauling slang!`;
     }
 
+    // Build messages with recent announcements for context
+    const messages = [
+      {
+        role: "system",
+        content: "You are Ava, the sarcastic and flirty AI DJ for WF4S Haulin' Radio. You're funny as hell, use space puns, trucker slang, Star Citizen jokes, and aren't afraid to drop a 'damn' or 'hell' when it fits. You're a bit cheeky and love to tease the space truckers. Keep it VERY SHORT (max 180 chars). Be witty, sarcastic, playful, and a little spicy! IMPORTANT: Vary your opening phrases - don't repeat the same greeting or intro multiple times in a row. Mix it up!"
+      }
+    ];
+    
+    // Add recent announcements as context to avoid repetition
+    if (recentAnnouncements.length > 0) {
+      messages.push({
+        role: "system",
+        content: `Your last ${recentAnnouncements.length} announcements were: ${recentAnnouncements.join(' | ')} - Make sure this one is DIFFERENT. Use a fresh opening and vary your style.`
+      });
+    }
+    
+    messages.push({
+      role: "user",
+      content: prompt
+    });
+
     const completion = await openai.createChatCompletion({
       model: "gpt-4o",
-      messages: [
-        {
-          role: "system",
-          content: "You are Ava, the sarcastic and flirty AI DJ for WF4S Haulin' Radio. You're funny as hell, use space puns, trucker slang, Star Citizen jokes, and aren't afraid to drop a 'damn' or 'hell' when it fits. You're a bit cheeky and love to tease the space truckers. Keep it VERY SHORT (max 180 chars). Be witty, sarcastic, playful, and a little spicy!"
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
+      messages: messages,
+      temperature: 0.9,
       max_tokens: 80
     });
 
     const text = completion.data.choices[0].message.content;
     console.log('Generated text:', text);
+    
+    // Track this announcement to avoid repetition
+    recentAnnouncements.push(text);
+    if (recentAnnouncements.length > MAX_RECENT_ANNOUNCEMENTS) {
+      recentAnnouncements.shift();
+    }
+    
     playAudio(songObj, text);
   } catch(err) {
     console.error('Error generating radio content:', err);
@@ -601,7 +636,13 @@ async function playSong(songObj) {
   try {
     let stream;
     
-    if (source === 'soundcloud') {
+    if (source === 'youtube') {
+      // YouTube streaming with play-dl
+      console.log('Fetching YouTube stream...');
+      const { streamTrackWithPlayDl } = require('./get_tracks_playdl');
+      stream = await streamTrackWithPlayDl(trackId);
+      console.log('YouTube stream ready');
+    } else if (source === 'soundcloud') {
       // SoundCloud streaming with timeout
       console.log('Fetching SoundCloud track info...');
       
@@ -681,8 +722,8 @@ async function playSong(songObj) {
   } catch (error) {
     console.error(`Error in playSong (${source}):`, error.message);
     
-    // If SoundCloud fails, try Audius as fallback
-    if (source === 'soundcloud') {
+    // If YouTube or SoundCloud fails, try Audius as fallback
+    if (source === 'youtube' || source === 'soundcloud') {
       console.log('SoundCloud failed, attempting Audius fallback...');
       try {
         const audiusTracks = await getAudiusTracks();
