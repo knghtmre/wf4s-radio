@@ -9,6 +9,8 @@ const discordTTS = require("discord-tts");
 const { Configuration, OpenAIApi } = require('openai');
 const sdk = require('microsoft-cognitiveservices-speech-sdk');
 const { PassThrough } = require('stream');
+const SoundCloud = require('soundcloud-scraper');
+const soundcloudClient = new SoundCloud.Client();
 
 // NewsAPI initialization removed
 
@@ -25,6 +27,12 @@ let scNews = [];
 let newsIndex = 0;
 let announceZuluTime = true; // Toggle for every other announcement
 let songsSinceNews = 0;
+
+// SoundCloud track caching
+let soundcloudTracks = [];
+let soundcloudTrackIndex = 0;
+let soundcloudLastFetch = 0;
+const SOUNDCLOUD_CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
 const ElevenLabs = require('elevenlabs-node');
 let voice = undefined;
@@ -155,20 +163,35 @@ async function start() {
   try {
 
     try {
-      // Get trending tracks from Audius
-      const audiusTracks = await getAudiusTracks();
-      if (!audiusTracks || audiusTracks.length === 0) {
-        console.error('No tracks available from Audius');
+      // Try SoundCloud first, fallback to Audius
+      let tracks = [];
+      let source = 'soundcloud';
+      
+      try {
+        console.log('Attempting to fetch tracks from SoundCloud...');
+        tracks = await getSoundCloudTracks();
+        console.log(`Loaded ${tracks.length} tracks from SoundCloud`);
+      } catch (scError) {
+        console.warn('SoundCloud failed, falling back to Audius:', scError.message);
+        source = 'audius';
+        tracks = await getAudiusTracks();
+        console.log(`Loaded ${tracks.length} tracks from Audius (fallback)`);
+      }
+      
+      if (!tracks || tracks.length === 0) {
+        console.error('No tracks available from any source');
         playInitialMessage();
         return;
       }
 
-      const nextSong = getRandomElement(audiusTracks);
+      const nextSong = getRandomElement(tracks);
       if (!nextSong) {
         console.error('Could not get next song');
         playInitialMessage();
         return;
       }
+      
+      nextSong.source = source; // Track which source we're using
 
       // Decide if we should announce news (every 3-5 songs)
       songsSinceNews++;
@@ -176,11 +199,11 @@ async function start() {
       
       if (shouldAnnounceNews && scNews.length > 0) {
         const newsItem = getNextNews();
-        await get(newsItem, nextSong.title, nextSong.id, true);
+        await get(newsItem, nextSong, true);
         songsSinceNews = 0;
       } else {
         // Just announce the song
-        await get(null, nextSong.title, nextSong.id, false);
+        await get(null, nextSong, false);
       }
     } catch (error) {
       console.error('Error in playlist handling:', error);
@@ -223,6 +246,64 @@ async function getAudiusTracks() {
       });
     }).on('error', reject);
   });
+}
+
+async function getSoundCloudTracks() {
+  try {
+    // Check if we have cached tracks that are still fresh
+    const now = Date.now();
+    if (soundcloudTracks.length > 0 && (now - soundcloudLastFetch) < SOUNDCLOUD_CACHE_DURATION) {
+      console.log(`Using cached SoundCloud tracks (${soundcloudTracks.length} available)`);
+      return soundcloudTracks;
+    }
+    
+    console.log('Fetching fresh SoundCloud tracks...');
+    
+    // Search for popular electronic/dance music on SoundCloud
+    const searchQueries = [
+      'electronic music',
+      'dance music',
+      'EDM',
+      'house music',
+      'chill music',
+      'synthwave',
+      'space music'
+    ];
+    
+    const randomQuery = searchQueries[Math.floor(Math.random() * searchQueries.length)];
+    console.log(`Searching SoundCloud for: ${randomQuery}`);
+    
+    // Add timeout to prevent hanging
+    const searchPromise = soundcloudClient.search(randomQuery, 'track', 50);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('SoundCloud search timeout')), 15000)
+    );
+    
+    const results = await Promise.race([searchPromise, timeoutPromise]);
+    
+    if (!results || results.length === 0) {
+      throw new Error('No SoundCloud tracks found');
+    }
+    
+    // Format tracks to match our structure
+    const tracks = results.map(track => ({
+      id: track.url,  // SoundCloud URL
+      title: `${track.artist} - ${track.name}`,
+      artist: track.artist,
+      source: 'soundcloud'
+    }));
+    
+    // Cache the tracks
+    soundcloudTracks = tracks;
+    soundcloudLastFetch = now;
+    soundcloudTrackIndex = 0;
+    
+    console.log(`Found and cached ${tracks.length} SoundCloud tracks`);
+    return tracks;
+  } catch (error) {
+    console.error('Error fetching SoundCloud tracks:', error);
+    throw error;
+  }
 }
 
 async function getNextSong(items) {
@@ -293,7 +374,10 @@ function getNextNews() {
   return news;
 }
 
-async function get(newsItem, nextSong, url, hasNews) {
+async function get(newsItem, songObj, hasNews) {
+  const nextSong = songObj.title;
+  const url = songObj.id;
+  const source = songObj.source || 'audius';
   const todaysDate = new Date();
   const time = todaysDate.getHours()+":"+todaysDate.getMinutes();
   
@@ -336,15 +420,17 @@ async function get(newsItem, nextSong, url, hasNews) {
 
     const text = completion.data.choices[0].message.content;
     console.log('Generated text:', text);
-    playAudio(url, text);
+    playAudio(songObj, text);
   } catch(err) {
     console.error('Error generating radio content:', err);
-    playAudio(url, process.env.errormessage);
+    playAudio(songObj, process.env.errormessage);
   }
 }
 
-async function playAudio(link, message) {
+async function playAudio(songObj, message) {
   console.log('Playing audio message and song...');
+  const link = songObj.id;
+  const source = songObj.source || 'audius';
 
   if(premiumVoice == false){
   const messageParts = splitString(message);
@@ -353,7 +439,7 @@ async function playAudio(link, message) {
   player.on(AudioPlayerStatus.Idle, () => {
     if (messageParts.length === 0) {
       player.removeAllListeners();
-      playSong(link);
+      playSong(songObj);
     } else {
       playTextToSpeech(messageParts.shift());
     }
@@ -367,7 +453,7 @@ async function playAudio(link, message) {
   setTimeout(function(){
     player.once(AudioPlayerStatus.Idle, () => {
       console.log('TTS finished, starting music...');
-      playSong(link);
+      playSong(songObj);
     });
   }, 1000)  // Short delay to let TTS start
 
@@ -445,24 +531,49 @@ async function playTextToSpeechElevenLabs(text) {
   player.play(audioResource);
 }
 
-async function playSong(trackId) {
-  if (!trackId || typeof trackId !== 'string') {
+async function playSong(songObj) {
+  const trackId = songObj.id;
+  const source = songObj.source || 'audius';
+  
+  if (!trackId) {
     console.error('Invalid track ID provided to playSong:', trackId);
     queue();
     return;
   }
 
-  console.log('Playing Audius track:', trackId);
+  console.log(`Playing ${source} track:`, trackId);
   
   try {
-    // Audius stream URL - simple and direct!
-    const streamUrl = `https://api.audius.co/v1/tracks/${trackId}/stream?app_name=WF4SRadio`;
-    console.log('Stream URL:', streamUrl);
+    let stream;
     
-    const https = require('https');
-    
-    // Create a promise to wait for the response
-    const stream = await new Promise((resolve, reject) => {
+    if (source === 'soundcloud') {
+      // SoundCloud streaming with timeout
+      console.log('Fetching SoundCloud track info...');
+      
+      const getSongInfoPromise = soundcloudClient.getSongInfo(trackId);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('SoundCloud getSongInfo timeout')), 10000)
+      );
+      
+      const songInfo = await Promise.race([getSongInfoPromise, timeoutPromise]);
+      
+      console.log('Getting progressive stream...');
+      const streamPromise = songInfo.downloadProgressive();
+      const streamTimeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('SoundCloud stream timeout')), 10000)
+      );
+      
+      stream = await Promise.race([streamPromise, streamTimeoutPromise]);
+      console.log('SoundCloud stream ready');
+    } else {
+      // Audius stream URL - simple and direct!
+      const streamUrl = `https://api.audius.co/v1/tracks/${trackId}/stream?app_name=WF4SRadio`;
+      console.log('Stream URL:', streamUrl);
+      
+      const https = require('https');
+      
+      // Create a promise to wait for the response
+      stream = await new Promise((resolve, reject) => {
       https.get(streamUrl, (response) => {
         if (response.statusCode === 302 || response.statusCode === 301) {
           // Follow redirect
@@ -481,10 +592,12 @@ async function playSong(trackId) {
           reject(new Error(`HTTP ${response.statusCode}`));
         }
       }).on('error', reject);
-    });
-
+      });
+    }
+    
+    // Common error handling for both sources
     stream.on('error', (error) => {
-      console.error('Audius stream error:', error);
+      console.error(`${source} stream error:`, error);
       queue();
     });
 
@@ -511,7 +624,24 @@ async function playSong(trackId) {
     player.play(resource);
 
   } catch (error) {
-    console.error('Error in playSong:', error);
+    console.error(`Error in playSong (${source}):`, error.message);
+    
+    // If SoundCloud fails, try Audius as fallback
+    if (source === 'soundcloud') {
+      console.log('SoundCloud failed, attempting Audius fallback...');
+      try {
+        const audiusTracks = await getAudiusTracks();
+        if (audiusTracks && audiusTracks.length > 0) {
+          const fallbackSong = getRandomElement(audiusTracks);
+          fallbackSong.source = 'audius';
+          console.log('Playing Audius fallback track:', fallbackSong.title);
+          return playSong(fallbackSong);
+        }
+      } catch (fallbackError) {
+        console.error('Audius fallback also failed:', fallbackError.message);
+      }
+    }
+    
     queue();
   }
 }
