@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["nodejs", "python3"]
-
-[phases.install]
-cmds = ["npm ci --omit=dev || npm install --omit=dev"]
-
-[start]
-cmd = "node index.js"
