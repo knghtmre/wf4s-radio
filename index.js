@@ -9,9 +9,6 @@ const discordTTS = require("discord-tts");
 const { Configuration, OpenAIApi } = require('openai');
 const sdk = require('microsoft-cognitiveservices-speech-sdk');
 const { PassThrough } = require('stream');
-const SoundCloud = require('soundcloud-scraper');
-// Use API key from environment, or it will auto-generate one
-const soundcloudClient = new SoundCloud.Client(process.env.SOUNDCLOUD_API_KEY || 'dH1Xed1fpITYonugor6sw39jvdq58M3h');
 const play = require('play-dl');
 
 // NewsAPI initialization removed
@@ -29,12 +26,6 @@ let scNews = [];
 let newsIndex = 0;
 let announceZuluTime = true; // Toggle for every other announcement
 let songsSinceNews = 0;
-
-// SoundCloud track caching
-let soundcloudTracks = [];
-let soundcloudTrackIndex = 0;
-let soundcloudLastFetch = 0;
-const SOUNDCLOUD_CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
 
 // Track recent announcements to avoid repetition
 let recentAnnouncements = [];
@@ -169,9 +160,9 @@ async function start() {
   try {
 
     try {
-      // Try SoundCloud first, fallback to Audius
+      // Try YouTube first, fallback to Audius
       let tracks = [];
-      let source = 'soundcloud';
+      let source = 'youtube';
       
       try {
         // Try YouTube first with play-dl
@@ -257,107 +248,7 @@ async function getAudiusTracks() {
   });
 }
 
-async function getSoundCloudTracks() {
-  try {
-    // Check if we have cached tracks that are still fresh
-    const now = Date.now();
-    if (soundcloudTracks.length > 0 && (now - soundcloudLastFetch) < SOUNDCLOUD_CACHE_DURATION) {
-      console.log(`Using cached SoundCloud tracks (${soundcloudTracks.length} available)`);
-      return soundcloudTracks;
-    }
-    
-    console.log('Fetching fresh SoundCloud tracks...');
-    
-    // Search for popular electronic/dance music on SoundCloud
-    const searchQueries = [
-      'electronic music',
-      'dance music',
-      'EDM',
-      'house music',
-      'chill music',
-      'synthwave',
-      'space music'
-    ];
-    
-    const randomQuery = searchQueries[Math.floor(Math.random() * searchQueries.length)];
-    console.log(`Searching SoundCloud for: ${randomQuery}`);
-    
-    // Add timeout to prevent hanging
-    const searchPromise = soundcloudClient.search(randomQuery, 'track', 50);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('SoundCloud search timeout')), 15000)
-    );
-    
-    const results = await Promise.race([searchPromise, timeoutPromise]);
-    
-    console.log('SoundCloud search results type:', typeof results);
-    console.log('SoundCloud search results:', JSON.stringify(results).substring(0, 200));
-    
-    // Handle different response formats
-    let tracksArray = [];
-    if (Array.isArray(results)) {
-      tracksArray = results;
-    } else if (results && results.collection && Array.isArray(results.collection)) {
-      tracksArray = results.collection;
-    } else if (results && results.tracks && Array.isArray(results.tracks)) {
-      tracksArray = results.tracks;
-    } else {
-      console.error('Unexpected SoundCloud response format:', results);
-      throw new Error('Invalid SoundCloud response format');
-    }
-    
-    if (!tracksArray || tracksArray.length === 0) {
-      throw new Error('No SoundCloud tracks found in response');
-    }
-    
-    console.log(`Processing ${tracksArray.length} SoundCloud tracks`);
-    console.log('Testing tracks for streamability...');
-    
-    const validTracks = [];
-    const testLimit = Math.min(30, tracksArray.length);
-    
-    for (let i = 0; i < testLimit && validTracks.length < 15; i++) {
-      const track = tracksArray[i];
-      if (!track || !track.url || !(track.name || track.title)) continue;
-      
-      try {
-        const info = await Promise.race([
-          soundcloudClient.getSongInfo(track.url),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000))
-        ]);
-        
-        if (info && info.trackURL) {
-          validTracks.push({
-            id: track.url,
-            title: `${track.artist || 'Unknown'} - ${track.name || track.title || 'Unknown'}`,
-            artist: track.artist || 'Unknown',
-            source: 'soundcloud'
-          });
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-    
-    if (validTracks.length === 0) {
-      throw new Error('No streamable SoundCloud tracks found');
-    }
-    
-    console.log(`Found ${validTracks.length} streamable tracks`);
-    const tracks = validTracks;
-    
-    // Cache the tracks
-    soundcloudTracks = tracks;
-    soundcloudLastFetch = now;
-    soundcloudTrackIndex = 0;
-    
-    console.log(`Found and cached ${tracks.length} SoundCloud tracks`);
-    return tracks;
-  } catch (error) {
-    console.error('Error fetching SoundCloud tracks:', error);
-    throw error;
-  }
-}
+
 
 async function getNextSong(items) {
   if (!items || !Array.isArray(items) || items.length === 0) {
