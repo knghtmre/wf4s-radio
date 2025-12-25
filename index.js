@@ -181,18 +181,10 @@ async function start() {
         source = 'youtube';
         console.log(`Loaded ${tracks.length} tracks from YouTube`);
       } catch (ytError) {
-        console.warn('YouTube failed, trying SoundCloud:', ytError.message);
-        try {
-          console.log('Attempting to fetch tracks from SoundCloud...');
-          tracks = await getSoundCloudTracks();
-          source = 'soundcloud';
-          console.log(`Loaded ${tracks.length} tracks from SoundCloud`);
-        } catch (scError) {
-          console.warn('SoundCloud also failed, falling back to Audius:', scError.message);
-          source = 'audius';
-          tracks = await getAudiusTracks();
-          console.log(`Loaded ${tracks.length} tracks from Audius (fallback)`);
-        }
+        console.warn('YouTube failed, falling back to Audius:', ytError.message);
+        source = 'audius';
+        tracks = await getAudiusTracks();
+        console.log(`Loaded ${tracks.length} tracks from Audius (fallback)`);
       }
       
       if (!tracks || tracks.length === 0) {
@@ -467,7 +459,7 @@ async function get(newsItem, songObj, hasNews) {
     const messages = [
       {
         role: "system",
-        content: "You are Ava, the sarcastic and flirty AI DJ for WF4S Haulin' Radio. You're funny as hell, use space puns, trucker slang, Star Citizen jokes, and aren't afraid to drop a 'damn' or 'hell' when it fits. You're a bit cheeky and love to tease the space truckers. Keep it VERY SHORT (max 180 chars). Be witty, sarcastic, playful, and a little spicy! IMPORTANT: Vary your opening phrases - don't repeat the same greeting or intro multiple times in a row. Mix it up!"
+        content: "You are Ava, the sarcastic and flirty AI DJ for WF4S Haulin' Radio. You're funny as hell, use space puns, trucker slang, Star Citizen jokes, and aren't afraid to drop a 'damn' or 'hell' when it fits. You're a bit cheeky and love to tease the space truckers. Keep it VERY SHORT (max 180 chars). Be witty, sarcastic, playful, and a little spicy! IMPORTANT: Vary your opening phrases - don't repeat the same greeting or intro multiple times in a row. Mix it up! Avoid overusing phrases like 'buckle up', 'strap in', 'hold on tight' - use diverse vocabulary."
       }
     ];
     
@@ -475,7 +467,7 @@ async function get(newsItem, songObj, hasNews) {
     if (recentAnnouncements.length > 0) {
       messages.push({
         role: "system",
-        content: `Your last ${recentAnnouncements.length} announcements were: ${recentAnnouncements.join(' | ')} - Make sure this one is DIFFERENT. Use a fresh opening and vary your style.`
+        content: `Your last ${recentAnnouncements.length} announcements were: ${recentAnnouncements.join(' | ')} - Make sure this one is DIFFERENT. Use a fresh opening and vary your style. DO NOT use phrases like 'buckle up', 'strap in', 'hold on' if you've used them recently. Vary your vocabulary completely.`
       });
     }
     
@@ -642,25 +634,6 @@ async function playSong(songObj) {
       const { streamTrackWithPlayDl } = require('./get_tracks_playdl');
       stream = await streamTrackWithPlayDl(trackId);
       console.log('YouTube stream ready');
-    } else if (source === 'soundcloud') {
-      // SoundCloud streaming with timeout
-      console.log('Fetching SoundCloud track info...');
-      
-      const getSongInfoPromise = soundcloudClient.getSongInfo(trackId);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('SoundCloud getSongInfo timeout')), 10000)
-      );
-      
-      const songInfo = await Promise.race([getSongInfoPromise, timeoutPromise]);
-      
-      console.log('Getting progressive stream...');
-      const streamPromise = songInfo.downloadProgressive();
-      const streamTimeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('SoundCloud stream timeout')), 10000)
-      );
-      
-      stream = await Promise.race([streamPromise, streamTimeoutPromise]);
-      console.log('SoundCloud stream ready');
     } else {
       // Audius stream URL - simple and direct!
       const streamUrl = `https://api.audius.co/v1/tracks/${trackId}/stream?app_name=WF4SRadio`;
@@ -722,9 +695,9 @@ async function playSong(songObj) {
   } catch (error) {
     console.error(`Error in playSong (${source}):`, error.message);
     
-    // If YouTube or SoundCloud fails, try Audius as fallback
-    if (source === 'youtube' || source === 'soundcloud') {
-      console.log('SoundCloud failed, attempting Audius fallback...');
+    // If YouTube fails, try Audius as fallback
+    if (source === 'youtube') {
+      console.log('YouTube failed, attempting Audius fallback...');
       try {
         const audiusTracks = await getAudiusTracks();
         if (audiusTracks && audiusTracks.length > 0) {
