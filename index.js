@@ -106,8 +106,37 @@ client.on('messageCreate', async message => {
   const commandName = args.shift().toLowerCase();
 
   if(commandName == "skip"){
-    connection.player.stop();
-    start()
+    player.stop();
+    queue();
+    message.reply('⏭️ Skipping to next track!');
+  }
+  
+  if(commandName == "stop"){
+    player.stop();
+    message.reply('⏹️ Radio stopped. Use `play` to resume.');
+  }
+  
+  if(commandName == "play"){
+    queue();
+    message.reply('▶️ Radio starting!');
+  }
+  
+  if(commandName == "news"){
+    const newsStory = getRandomNews();
+    if (newsStory) {
+      message.reply(`📰 **Star Citizen News:** ${newsStory}`);
+    } else {
+      message.reply('No news available right now.');
+    }
+  }
+  
+  if(commandName == "genre"){
+    const genre = args[0];
+    if (genre) {
+      message.reply(`🎵 Genre preference noted: ${genre} (feature coming soon!)`);
+    } else {
+      message.reply('Usage: `genre <electronic|chill|dance|house>`');
+    }
   }
 });
 
