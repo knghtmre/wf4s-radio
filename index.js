@@ -585,16 +585,17 @@ async function playSong(trackId) {
       highWaterMark: 1 << 25  // 32MB buffer to prevent skipping
     });
 
-    resource.volume?.setVolume(1);
+    resource.volume?.setVolume(0.35);  // 35% volume for balance with voice
     
-    // Remove existing listeners before adding new ones
-    player.removeAllListeners();
+    // Remove only the specific listeners we're about to add
+    player.removeAllListeners(AudioPlayerStatus.Idle);
+    player.removeAllListeners('error');
     
-    player.on(AudioPlayerStatus.Idle, () => {
+    player.once(AudioPlayerStatus.Idle, () => {
       queue();
     });
 
-    player.on('error', error => {
+    player.once('error', error => {
       console.error('Player error:', error);
       queue();
     });
