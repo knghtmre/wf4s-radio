@@ -345,7 +345,19 @@ async function get(newsItem, nextSong, url, hasNews) {
       max_tokens: 80
     });
 
-    const text = completion.data.choices[0].message.content;
+    let text = completion.data.choices[0].message.content;
+    
+    // Validate: reject if contains banned phrases
+    const bannedPhrases = ['strap in', 'buckle up', 'space cowboys', 'hold on tight', 'cosmic cowpokes'];
+    const lowerText = text.toLowerCase();
+    const hasBannedPhrase = bannedPhrases.some(phrase => lowerText.includes(phrase));
+    
+    if (hasBannedPhrase) {
+      console.log('Rejected text with banned phrase:', text);
+      // Use a simple fallback instead
+      text = `Next up on WF4S: ${nextSong}!`;
+    }
+    
     console.log('Generated text:', text);
     
     // Track this announcement to avoid repetition
@@ -378,8 +390,8 @@ async function playAudio(link, message) {
   });
 },3000)
 }else{
-  // Play TTS and wait for it to finish
-  playTextToSpeechAzure(message);  // Azure TTS
+  // Play TTS with proper fallback handling
+  await playTextToSpeech(message);
   
   // Wait a bit for TTS to start, then listen for it to finish
   setTimeout(function(){
