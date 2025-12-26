@@ -480,17 +480,34 @@ async function playTextToSpeechAzure(text, azureKey, azureRegion) {
 }
 
 async function playTextToSpeechElevenLabs(text) {
-  const stream = await voice.textToSpeechStream({
-    textInput: text,
-    responseType: 'stream', // Stream the audio directly
-    voiceId:         "x8xv0H8Ako6Iw3cKXLoC",         // User's custom voice
-    modelId:         "eleven_multilingual_v2",       // The ElevenLabs Model ID
-    responseType:    "stream",                       // The streaming type (arraybuffer, stream, json)    
+  return new Promise(async (resolve, reject) => {
+    try {
+      const stream = await voice.textToSpeechStream({
+        textInput: text,
+        voiceId: "x8xv0H8Ako6Iw3cKXLoC",
+        modelId: "eleven_multilingual_v2",
+        responseType: "stream"
+      });
+
+      const audioResource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+      
+      player.play(audioResource);
+      
+      // Wait for audio to finish
+      player.once(AudioPlayerStatus.Idle, () => {
+        resolve();
+      });
+      
+      // Handle errors
+      player.once('error', (error) => {
+        console.error('ElevenLabs playback error:', error);
+        reject(error);
+      });
+    } catch (error) {
+      console.error('ElevenLabs stream error:', error);
+      reject(error);
+    }
   });
-
-  const audioResource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
-
-  player.play(audioResource);
 }
 
 async function playSong(trackId) {
