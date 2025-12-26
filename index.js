@@ -318,24 +318,37 @@ async function get(newsItem, nextSong, url, hasNews) {
         : `You are Ava, the AI DJ for WF4S Haulin' Radio, a Star Citizen-themed station. Announce that you're playing this song next: ${nextSong} Keep it under 100 characters. Be brief, energetic, and use space/hauling slang!`;
     }
 
+    // Build anti-repetition context
+    let antiRepetitionHint = '';
+    if (recentAnnouncements.length > 0) {
+      antiRepetitionHint = `\n\nDO NOT use these phrases you used recently: ${recentAnnouncements.join(', ')}. NEVER repeat "strap in", "buckle up", "space cowboys", or "hold on tight" - you've used them too much. Use completely different openings every time.`;
+    }
+
     const completion = await openai.createChatCompletion({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are Ava, the sarcastic and flirty AI DJ for WF4S Haulin' Radio. You're funny as hell, use space puns, trucker slang, Star Citizen jokes, and aren't afraid to drop a 'damn' or 'hell' when it fits. You're a bit cheeky and love to tease the space truckers. Keep it VERY SHORT (max 180 chars). Be witty, sarcastic, playful, and a little spicy!"
+          content: "You are Ava, the sarcastic and flirty AI DJ for WF4S Haulin' Radio. You're funny as hell, use space puns, trucker slang, Star Citizen jokes, and aren't afraid to drop a 'damn' or 'hell' when it fits. You're a bit cheeky and love to tease the space truckers. Keep it VERY SHORT (max 180 chars). Be witty, sarcastic, playful, and a little spicy!" + antiRepetitionHint
         },
         {
           role: "user",
           content: prompt
         }
       ],
-      temperature: 0.7,
+      temperature: 0.9,
       max_tokens: 80
     });
 
     const text = completion.data.choices[0].message.content;
     console.log('Generated text:', text);
+    
+    // Track this announcement to avoid repetition
+    recentAnnouncements.push(text);
+    if (recentAnnouncements.length > MAX_RECENT_ANNOUNCEMENTS) {
+      recentAnnouncements.shift();
+    }
+    
     playAudio(url, text);
   } catch(err) {
     console.error('Error generating radio content:', err);
@@ -474,26 +487,29 @@ async function playSong(trackId) {
     
     const https = require('https');
     
-    // Create a promise to wait for the response
+    // Create a promise to wait for the response with redirect following
     const stream = await new Promise((resolve, reject) => {
-      https.get(streamUrl, (response) => {
-        if (response.statusCode === 302 || response.statusCode === 301) {
-          // Follow redirect
-          const redirectUrl = response.headers.location;
-          console.log('Following redirect to:', redirectUrl);
-          https.get(redirectUrl, (redirectResponse) => {
-            if (redirectResponse.statusCode === 200) {
-              resolve(redirectResponse);
-            } else {
-              reject(new Error(`HTTP ${redirectResponse.statusCode}`));
-            }
-          }).on('error', reject);
-        } else if (response.statusCode === 200) {
-          resolve(response);
-        } else {
-          reject(new Error(`HTTP ${response.statusCode}`));
+      const followRedirect = (url, depth = 0) => {
+        if (depth > 5) {
+          reject(new Error('Too many redirects'));
+          return;
         }
-      }).on('error', reject);
+        
+        const protocol = url.startsWith('https') ? https : require('http');
+        protocol.get(url, (response) => {
+          if (response.statusCode === 302 || response.statusCode === 301) {
+            const redirectUrl = response.headers.location;
+            console.log(`Following redirect ${depth + 1} to:`, redirectUrl);
+            followRedirect(redirectUrl, depth + 1);
+          } else if (response.statusCode === 200) {
+            resolve(response);
+          } else {
+            reject(new Error(`HTTP ${response.statusCode}`));
+          }
+        }).on('error', reject);
+      };
+      
+      followRedirect(streamUrl);
     });
 
     stream.on('error', (error) => {
