@@ -384,7 +384,7 @@ async function get(newsItem, nextSong, url, hasNews) {
     if (hasBannedPhrase) {
       console.log('Rejected text with banned phrase:', text);
       // Use a simple fallback instead
-      text = `Next up on WF4S: ${nextSong}!`;
+      text = `Next up on WF4S Radio: ${nextSong}!`;
     }
     
     console.log('Generated text:', text);
