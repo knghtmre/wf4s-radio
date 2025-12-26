@@ -412,13 +412,7 @@ function playTextToSpeechGoogle(text) {
 
 async function playTextToSpeech(text) {
   try {
-    // Try ElevenLabs first if API key is configured
-    if (process.env.ELEVEN_LABS_API_KEY && voice) {
-      console.log('Using ElevenLabs TTS');
-      return await playTextToSpeechElevenLabs(text);
-    }
-    
-    // Fallback to Azure if configured
+    // Try Azure first if configured
     const azureKey = process.env.AZURE_SPEECH_KEY;
     const azureRegion = process.env.AZURE_SPEECH_REGION || 'eastus';
     
