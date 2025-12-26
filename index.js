@@ -381,14 +381,27 @@ function playTextToSpeechGoogle(text) {
 }
 
 async function playTextToSpeech(text) {
+  // Try ElevenLabs first if API key is configured
+  if (process.env.ELEVEN_LABS_API_KEY && voice) {
+    console.log('Using ElevenLabs TTS');
+    return playTextToSpeechElevenLabs(text);
+  }
+  
+  // Fallback to Azure if configured
   const azureKey = process.env.AZURE_SPEECH_KEY;
   const azureRegion = process.env.AZURE_SPEECH_REGION || 'eastus';
   
-  if (!azureKey) {
-    console.error('Azure Speech key not configured, falling back to Google TTS');
-    playTextToSpeechGoogle(text);
-    return;
+  if (azureKey) {
+    console.log('Using Azure TTS');
+    return playTextToSpeechAzure(text, azureKey, azureRegion);
   }
+  
+  // Final fallback to Google TTS
+  console.log('Using Google TTS (fallback)');
+  playTextToSpeechGoogle(text);
+}
+
+async function playTextToSpeechAzure(text, azureKey, azureRegion) {
   
   return new Promise((resolve, reject) => {
     const speechConfig = sdk.SpeechConfig.fromSubscription(azureKey, azureRegion);
