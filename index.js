@@ -609,6 +609,7 @@ async function playSong(trackId) {
 }
 
 let jingleCounter = 0;
+let lastJingle = null; // Track last played jingle to prevent repeats
 
 async function playJingle() {
   try {
@@ -631,8 +632,16 @@ async function playJingle() {
       return false;
     }
     
-    // Pick random jingle
-    const jingleFile = files[Math.floor(Math.random() * files.length)];
+    // Pick random jingle (avoid repeating the last one)
+    let jingleFile;
+    if (files.length === 1) {
+      jingleFile = files[0];
+    } else {
+      // Filter out the last played jingle
+      const availableFiles = files.filter(file => file !== lastJingle);
+      jingleFile = availableFiles[Math.floor(Math.random() * availableFiles.length)];
+    }
+    lastJingle = jingleFile; // Remember this jingle
     const jinglePath = path.join(jinglesDir, jingleFile);
     
     console.log(`Playing jingle: ${jingleFile}`);
@@ -668,19 +677,19 @@ async function playJingle() {
 async function queue() {
   const userCount = await connectedUsers();
   if (userCount > 0) {
-    // Check if we should play a jingle
-    const jingleFrequency = parseInt(process.env.JINGLE_FREQUENCY) || 5; // Default: every 5 songs
+    // Alternate between Ava announcements and jingles
     jingleCounter++;
     
-    if (jingleCounter >= jingleFrequency) {
-      jingleCounter = 0;
+    if (jingleCounter % 2 === 0) {
+      // Even count: play jingle
       const played = await playJingle();
       if (played) {
         // Wait a bit after jingle before starting next song
-        setTimeout(start, 2000);
+        setTimeout(start, 1000);
         return;
       }
     }
+    // Odd count or jingle failed: play Ava announcement with song
     
     setTimeout(start, 1000);
   } else {
