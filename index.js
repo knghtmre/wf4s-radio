@@ -608,9 +608,80 @@ async function playSong(trackId) {
   }
 }
 
+let jingleCounter = 0;
+
+async function playJingle() {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const jinglesDir = path.join(__dirname, 'jingles');
+    
+    // Check if jingles directory exists
+    if (!fs.existsSync(jinglesDir)) {
+      console.log('No jingles directory found, skipping jingle');
+      return false;
+    }
+    
+    // Get all audio files from jingles directory
+    const files = fs.readdirSync(jinglesDir)
+      .filter(file => /\.(mp3|wav|ogg)$/i.test(file));
+    
+    if (files.length === 0) {
+      console.log('No jingle files found, skipping jingle');
+      return false;
+    }
+    
+    // Pick random jingle
+    const jingleFile = files[Math.floor(Math.random() * files.length)];
+    const jinglePath = path.join(jinglesDir, jingleFile);
+    
+    console.log(`Playing jingle: ${jingleFile}`);
+    
+    // Create audio resource from jingle file
+    const resource = createAudioResource(jinglePath, {
+      inlineVolume: true
+    });
+    
+    resource.volume?.setVolume(0.5);  // 50% volume for jingles
+    
+    // Play jingle and wait for it to finish
+    await new Promise((resolve) => {
+      player.removeAllListeners(AudioPlayerStatus.Idle);
+      player.removeAllListeners('error');
+      
+      player.once(AudioPlayerStatus.Idle, resolve);
+      player.once('error', (error) => {
+        console.error('Jingle playback error:', error);
+        resolve();
+      });
+      
+      player.play(resource);
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error playing jingle:', error);
+    return false;
+  }
+}
+
 async function queue() {
   const userCount = await connectedUsers();
   if (userCount > 0) {
+    // Check if we should play a jingle
+    const jingleFrequency = parseInt(process.env.JINGLE_FREQUENCY) || 5; // Default: every 5 songs
+    jingleCounter++;
+    
+    if (jingleCounter >= jingleFrequency) {
+      jingleCounter = 0;
+      const played = await playJingle();
+      if (played) {
+        // Wait a bit after jingle before starting next song
+        setTimeout(start, 2000);
+        return;
+      }
+    }
+    
     setTimeout(start, 1000);
   } else {
     setTimeout(queue, 1000);
